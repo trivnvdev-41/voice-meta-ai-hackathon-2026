@@ -10,22 +10,22 @@ import {
 } from "../src/auth.js";
 
 describe("password hashing", () => {
-  it("verifies correct password", () => {
-    const stored = hashPassword("rahasia123");
-    expect(verifyPassword("rahasia123", stored)).toBe(true);
+  it("verifies correct password", async () => {
+    const stored = await hashPassword("rahasia123");
+    expect(await verifyPassword("rahasia123", stored)).toBe(true);
   });
 
-  it("rejects wrong password", () => {
-    const stored = hashPassword("rahasia123");
-    expect(verifyPassword("salah", stored)).toBe(false);
+  it("rejects wrong password", async () => {
+    const stored = await hashPassword("rahasia123");
+    expect(await verifyPassword("salah", stored)).toBe(false);
   });
 
-  it("rejects malformed stored hash", () => {
-    expect(verifyPassword("x", "no-colon")).toBe(false);
+  it("rejects malformed stored hash", async () => {
+    expect(await verifyPassword("x", "no-colon")).toBe(false);
   });
 
-  it("uses random salt", () => {
-    expect(hashPassword("sama")).not.toBe(hashPassword("sama"));
+  it("uses random salt", async () => {
+    expect(await hashPassword("sama")).not.toBe(await hashPassword("sama"));
   });
 });
 
@@ -64,5 +64,10 @@ describe("cookie helpers", () => {
 
   it("clears session", () => {
     expect(clearSessionCookieHeader()).toContain("Max-Age=0");
+  });
+
+  it("marks the cookie Secure over https and not over http", () => {
+    expect(sessionCookieHeader("v", true)).toContain("; Secure");
+    expect(sessionCookieHeader("v", false)).not.toContain("; Secure");
   });
 });

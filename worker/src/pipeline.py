@@ -6,7 +6,7 @@ import uuid
 from . import dispatch as dispatch_mod
 from .config import WorkerConfig
 from .meta import download_media
-from .store import DuplicateRecipe, save_recipe, upload_bytes
+from .store import DuplicateRecipe, presign_key, save_recipe, upload_bytes
 from .structure import structure_recipe
 from .stt import transcribe
 from .tts import synthesize
@@ -45,14 +45,14 @@ def run_job(cfg: WorkerConfig, job: dict) -> None:
             return
         audio_bytes, mime = download_media(audio_id, cfg.whatsapp_token)
         ext = "ogg" if "ogg" in mime else "mp3"
-        voice_url = upload_bytes(
+        voice_key = upload_bytes(
             cfg, f"voice/{uuid.uuid4()}.{ext}", audio_bytes, mime
         )
         transcript = transcribe(audio_bytes, f"recipe.{ext}", cfg.openai_api_key)
         draft = structure_recipe(
             transcript, cfg.meta_api_key, cfg.meta_base_url, cfg.meta_model
         )
-        save_recipe(cfg, to, str(job.get("messageId", "")), draft, transcript, voice_url)
+        save_recipe(cfg, to, str(job.get("messageId", "")), draft, transcript, voice_key)
         reply = summarize_reply(
             draft.recipe_name,
             len(draft.ingredients),
@@ -60,12 +60,15 @@ def run_job(cfg: WorkerConfig, job: dict) -> None:
             draft.needs_clarification,
         )
         voice_reply = synthesize(reply, cfg.elevenlabs_api_key, cfg.elevenlabs_voice_id)
-        reply_url = upload_bytes(
+        reply_key = upload_bytes(
             cfg, f"replies/{uuid.uuid4()}.mp3", voice_reply, "audio/mpeg"
         )
-        dispatch_mod.dispatch(cfg, to, text=reply, audio_link=reply_url)
+        dispatch_mod.dispatch(
+            cfg, to, text=reply, audio_link=presign_key(cfg, reply_key)
+        )
     except DuplicateRecipe:
         dispatch_mod.dispatch(cfg, to, text=ALREADY_SAVED_TEXT)
     except Exception as exc:
         print(f"job failed: {type(exc).__name__}: {exc}", flush=True)
         dispatch_mod.dispatch(cfg, to, text=FAILURE_TEXT)
+        raise

@@ -5,10 +5,12 @@ which is moved back to the main queue on the next boot.
 """
 from __future__ import annotations
 
+import json
 from typing import Protocol
 
 
 class ListClient(Protocol):
+    def lpush(self, name: str, value: str) -> int: ...
     def blmove(
         self,
         source: str,
@@ -44,3 +46,21 @@ def requeue_processing(
     while client.lmove(processing, queue_name, src="LEFT", dest="RIGHT") is not None:
         moved += 1
     return moved
+
+
+def push_job(client: ListClient, queue_name: str, payload: str) -> None:
+    client.lpush(queue_name, payload)
+
+
+def dead_letter_name(queue_name: str) -> str:
+    return f"{queue_name}:dead"
+
+
+def dead_letter(
+    client: ListClient, queue_name: str, payload: str, error: str
+) -> None:
+    """Park an unrecoverable job so it can be inspected instead of lost."""
+    client.lpush(
+        dead_letter_name(queue_name),
+        json.dumps({"payload": payload, "error": error}),
+    )

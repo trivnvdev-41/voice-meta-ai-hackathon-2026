@@ -8,6 +8,17 @@ NAV_REPEAT = ("ulangi", "apa tadi", "repeat")
 NAV_PREV = ("kembali", "sebelumnya", "mundur", "balik")
 NAV_INGREDIENTS = ("bahan", "apa saja", "apa aja")
 
+
+def _is_nav(said: str, words: tuple[str, ...]) -> bool:
+    """Navigation is a short command ("lanjut", "lanjut dong"), not a question."""
+    cleaned = said.strip(" .,!?")
+    if cleaned in words:
+        return True
+    return len(cleaned.split()) <= 2 and any(
+        cleaned.startswith(w + " ") for w in words
+    )
+
+
 QA_PROMPT = """Kamu asisten masak suara. Jawab MAKSIMAL 2 kalimat, Bahasa Indonesia santai.
 Resep: {recipe_name} (marga {family_name}, {region}).
 Bahan: {ingredients}
@@ -51,14 +62,14 @@ class CopilotSession:
         model: str = DEFAULT_MODEL,
     ) -> str:
         said = transcript.lower()
-        if any(k in said for k in NAV_REPEAT):
+        if _is_nav(said, NAV_REPEAT):
             reply = self._say_step() if self.steps else "Belum ada langkah."
-        elif any(k in said for k in NAV_PREV):
+        elif _is_nav(said, NAV_PREV):
             self.step_idx = max(0, self.step_idx - 1)
             reply = self._say_step() if self.steps else "Belum ada langkah."
         elif any(k in said for k in NAV_INGREDIENTS):
             reply = self._say_ingredients()
-        elif any(k in said for k in NAV_NEXT):
+        elif _is_nav(said, NAV_NEXT):
             reply = self._advance()
         else:
             reply = answer_question(self, transcript, api_key, base_url, model)

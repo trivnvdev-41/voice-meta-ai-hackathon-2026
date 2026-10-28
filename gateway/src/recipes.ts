@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from "express";
 import {
   clearSessionCookieHeader,
   hashPassword,
+  isHttps,
   sessionCookieHeader,
   sessionFromHeader,
   signSession,
@@ -10,6 +11,9 @@ import {
   verifySession,
 } from "./auth.js";
 import type { Db } from "./db.js";
+import { asyncHandler } from "./http.js";
+import type { Presign } from "./media.js";
+import { createRateLimiter } from "./ratelimit.js";
 import {
   sendCallButtonMessage,
   type CallButtonOptions,
@@ -28,6 +32,7 @@ export interface ApiDeps {
   sessionSecret: string;
   creds: WhatsAppCredentials;
   sendCallButton?: (to: string, opts: CallButtonOptions) => Promise<void>;
+  presign?: Presign;
 }
 
 type AuthedRequest = Request & { user?: ApiUser };
@@ -82,9 +87,11 @@ function isValidEmail(email: unknown): boolean {
 }
 
 export function createApiRouter(deps: ApiDeps): Router {
-  const { db, sessionSecret, creds } = deps;
+  const { db, sessionSecret, creds, presign } = deps;
   const sendCallButton =
     deps.sendCallButton ?? ((to, opts) => sendCallButtonMessage(creds, to, opts));
+  const allowLogin = createRateLimiter({ limit: 10, windowMs: 60_000 });
+  const allowRegister = createRateLimiter({ limit: 5, windowMs: 60_000 });
   const router = Router();
 
   router.use(async (req: AuthedRequest, _res, next) => {
@@ -97,12 +104,17 @@ export function createApiRouter(deps: ApiDeps): Router {
     next();
   });
 
-  router.post("/register", async (req: Request, res: Response) => {
-    const { email, password, displayName, role } = req.body as {
+  router.post("/register", asyncHandler(async (req: Request, res: Response) => {
+    if (!allowRegister(req.ip ?? "unknown")) {
+      res.status(429).json({ error: "terlalu banyak percobaan, coba lagi nanti" });
+      return;
+    }
+    const { email, password, displayName, role, waId } = req.body as {
       email?: unknown;
       password?: unknown;
       displayName?: unknown;
       role?: unknown;
+      waId?: unknown;
     };
     if (!isValidEmail(email) || typeof password !== "string" || password.length < 8) {
       res.status(400).json({ error: "email valid + password min 8 karakter" });
@@ -112,23 +124,36 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.status(400).json({ error: "role harus author atau client" });
       return;
     }
+    const wa = typeof waId === "string" ? waId.replace(/\D/g, "") : "";
+    if (wa && (wa.length < 8 || wa.length > 15)) {
+      res.status(400).json({ error: "nomor WhatsApp tidak valid" });
+      return;
+    }
     const existing = await db.query("SELECT id FROM users WHERE email = $1", [email]);
     if (existing.rows.length > 0) {
       res.status(409).json({ error: "email sudah terdaftar" });
       return;
     }
+    if (wa) {
+      const taken = await db.query("SELECT id FROM users WHERE wa_id = $1", [wa]);
+      if (taken.rows.length > 0) {
+        res.status(409).json({ error: "nomor WhatsApp sudah tertaut" });
+        return;
+      }
+    }
     const userId = randomUUID();
     const familyId = randomUUID();
     const memberId = randomUUID();
     const name = typeof displayName === "string" ? displayName : "";
-    await db.query(
-      "INSERT INTO users (id, email, wa_id, family_id, password_hash, role, display_name) VALUES ($1, $2, NULL, $3, $4, $5, $6)",
-      [userId, email, familyId, hashPassword(password), role ?? "client", name],
-    );
+    // families must exist before users: users.family_id is a FK to families(id).
     await db.query("INSERT INTO families (id, name) VALUES ($1, $2)", [
       familyId,
       `Keluarga ${name || email}`,
     ]);
+    await db.query(
+      "INSERT INTO users (id, email, wa_id, family_id, password_hash, role, display_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [userId, email, wa || null, familyId, await hashPassword(password), role ?? "client", name],
+    );
     await db.query(
       "INSERT INTO members (id, family_id, wa_id, role, display_name) VALUES ($1, $2, NULL, $3, $4)",
       [memberId, familyId, "owner", name],
@@ -139,18 +164,22 @@ export function createApiRouter(deps: ApiDeps): Router {
       role: String(role ?? "client"),
       displayName: name,
     };
-    res.setHeader("Set-Cookie", sessionCookieHeader(signSession(userId, sessionSecret)));
+    res.setHeader("Set-Cookie", sessionCookieHeader(signSession(userId, sessionSecret), isHttps(req)));
     res.status(201).json(publicUser(user));
-  });
+  }));
 
-  router.post("/login", async (req: Request, res: Response) => {
+  router.post("/login", asyncHandler(async (req: Request, res: Response) => {
+    if (!allowLogin(req.ip ?? "unknown")) {
+      res.status(429).json({ error: "terlalu banyak percobaan, coba lagi nanti" });
+      return;
+    }
     const { email, password } = req.body as { email?: unknown; password?: unknown };
     const found = await db.query(
       "SELECT id, email, password_hash, role, display_name FROM users WHERE email = $1",
       [email],
     );
     const row = found.rows[0];
-    if (!row || typeof password !== "string" || !verifyPassword(password, String(row.password_hash))) {
+    if (!row || typeof password !== "string" || !(await verifyPassword(password, String(row.password_hash)))) {
       res.status(401).json({ error: "email atau password salah" });
       return;
     }
@@ -160,12 +189,12 @@ export function createApiRouter(deps: ApiDeps): Router {
       role: String(row.role),
       displayName: String(row.display_name ?? ""),
     };
-    res.setHeader("Set-Cookie", sessionCookieHeader(signSession(user.id, sessionSecret)));
+    res.setHeader("Set-Cookie", sessionCookieHeader(signSession(user.id, sessionSecret), isHttps(req)));
     res.json(publicUser(user));
-  });
+  }));
 
-  router.post("/logout", (_req: Request, res: Response) => {
-    res.setHeader("Set-Cookie", clearSessionCookieHeader());
+  router.post("/logout", (req: Request, res: Response) => {
+    res.setHeader("Set-Cookie", clearSessionCookieHeader(isHttps(req)));
     res.sendStatus(204);
   });
 
@@ -177,7 +206,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     res.json(publicUser(req.user));
   });
 
-  router.get("/recipes", async (req: AuthedRequest, res: Response) => {
+  router.get("/recipes", asyncHandler(async (req: AuthedRequest, res: Response) => {
     const mine = req.user?.id ?? "";
     const result = await db.query(
       `SELECT id, name, creator_name, family_name, region, visibility, author_user_id
@@ -196,9 +225,9 @@ export function createApiRouter(deps: ApiDeps): Router {
         mine: r.author_user_id != null && String(r.author_user_id) === mine && mine !== "",
       })),
     );
-  });
+  }));
 
-  router.post("/recipes", async (req: AuthedRequest, res: Response) => {
+  router.post("/recipes", asyncHandler(async (req: AuthedRequest, res: Response) => {
     if (!req.user) {
       res.sendStatus(401);
       return;
@@ -220,11 +249,18 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.status(500).json({ error: "keluarga pemilik tidak ditemukan" });
       return;
     }
-    const memberId = randomUUID();
-    await db.query(
-      "INSERT INTO members (id, family_id, wa_id, role, display_name) VALUES ($1, $2, NULL, $3, $4)",
-      [memberId, familyId, "contributor", req.user.displayName],
+    const member = await db.query(
+      "SELECT id FROM members WHERE family_id = $1 AND wa_id IS NULL AND role = 'owner' LIMIT 1",
+      [familyId],
     );
+    let memberId = member.rows[0]?.id != null ? String(member.rows[0].id) : "";
+    if (!memberId) {
+      memberId = randomUUID();
+      await db.query(
+        "INSERT INTO members (id, family_id, wa_id, role, display_name) VALUES ($1, $2, NULL, $3, $4)",
+        [memberId, familyId, "owner", req.user.displayName],
+      );
+    }
     await db.query(
       `INSERT INTO recipes
        (id, family_id, contributor_member_id, author_user_id, wa_message_id, name,
@@ -250,9 +286,9 @@ export function createApiRouter(deps: ApiDeps): Router {
       ],
     );
     res.status(201).json({ id: recipeId });
-  });
+  }));
 
-  router.get("/recipes/:id", async (req: AuthedRequest, res: Response) => {
+  router.get("/recipes/:id", asyncHandler(async (req: AuthedRequest, res: Response) => {
     const result = await db.query(
       `SELECT id, name, creator_name, family_name, region, language, ingredients,
               steps, story, visibility, author_user_id
@@ -265,6 +301,10 @@ export function createApiRouter(deps: ApiDeps): Router {
       res.sendStatus(404);
       return;
     }
+    const media = await db.query(
+      "SELECT id, storage_url FROM media_assets WHERE recipe_id = $1 AND kind = 'voice' ORDER BY created_at DESC LIMIT 1",
+      [req.params.id],
+    );
     res.json({
       id: String(row.id),
       name: String(row.name),
@@ -277,8 +317,43 @@ export function createApiRouter(deps: ApiDeps): Router {
       story: String(row.story ?? ""),
       visibility: String(row.visibility),
       mine,
+      hasVoice: media.rows.length > 0,
     });
-  });
+  }));
+
+  // The archived voice note lives in object storage; sign it on read so the
+  // link never expires (unlike a presigned URL stored at upload time).
+  router.get("/recipes/:id/voice", asyncHandler(async (req: AuthedRequest, res: Response) => {
+    const found = await db.query(
+      "SELECT visibility, author_user_id FROM recipes WHERE id = $1",
+      [req.params.id],
+    );
+    const row = found.rows[0];
+    const mine = !!req.user && row?.author_user_id != null && String(row.author_user_id) === req.user.id;
+    if (!row || (String(row.visibility) !== "public" && !mine)) {
+      res.sendStatus(404);
+      return;
+    }
+    const media = await db.query(
+      "SELECT id, storage_url FROM media_assets WHERE recipe_id = $1 AND kind = 'voice' ORDER BY created_at DESC LIMIT 1",
+      [req.params.id],
+    );
+    const stored = media.rows[0]?.storage_url;
+    if (typeof stored !== "string" || !stored) {
+      res.sendStatus(404);
+      return;
+    }
+    // Rows written before this change hold a (now dead) presigned URL.
+    if (/^https?:\/\//.test(stored)) {
+      res.redirect(302, stored);
+      return;
+    }
+    if (!presign) {
+      res.status(503).json({ error: "arsip audio belum dikonfigurasi" });
+      return;
+    }
+    res.redirect(302, await presign(stored));
+  }));
 
   const updateGuard = async (req: AuthedRequest, res: Response): Promise<string | null> => {
     if (!req.user) {
@@ -296,7 +371,7 @@ export function createApiRouter(deps: ApiDeps): Router {
     return String(req.params.id);
   };
 
-  router.put("/recipes/:id", async (req: AuthedRequest, res: Response) => {
+  router.put("/recipes/:id", asyncHandler(async (req: AuthedRequest, res: Response) => {
     const id = await updateGuard(req, res);
     if (!id) return;
     const body = req.body as { [key: string]: unknown };
@@ -323,16 +398,16 @@ export function createApiRouter(deps: ApiDeps): Router {
       ],
     );
     res.json({ id });
-  });
+  }));
 
-  router.delete("/recipes/:id", async (req: AuthedRequest, res: Response) => {
+  router.delete("/recipes/:id", asyncHandler(async (req: AuthedRequest, res: Response) => {
     const id = await updateGuard(req, res);
     if (!id) return;
     await db.query("DELETE FROM recipes WHERE id = $1", [id]);
     res.sendStatus(204);
-  });
+  }));
 
-  router.post("/cook-sessions", async (req: AuthedRequest, res: Response) => {
+  router.post("/cook-sessions", asyncHandler(async (req: AuthedRequest, res: Response) => {
     if (!req.user) {
       res.sendStatus(401);
       return;
@@ -378,7 +453,7 @@ export function createApiRouter(deps: ApiDeps): Router {
       return;
     }
     res.status(201).json({ id: sessionId });
-  });
+  }));
 
   return router;
 }

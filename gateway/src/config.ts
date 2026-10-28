@@ -10,6 +10,10 @@ export interface GatewayConfig {
   databaseUrl: string;
   sessionSecret: string;
   migrationsDir: string;
+  s3Endpoint?: string;
+  s3Bucket?: string;
+  s3AccessKey?: string;
+  s3SecretKey?: string;
 }
 
 function required(name: string): string {
@@ -31,5 +35,9 @@ export function loadConfig(): GatewayConfig {
     databaseUrl: required("DATABASE_URL"),
     sessionSecret: required("SESSION_SECRET"),
     migrationsDir: process.env.MIGRATIONS_DIR ?? "migrations",
+    s3Endpoint: process.env.S3_ENDPOINT,
+    s3Bucket: process.env.S3_BUCKET,
+    s3AccessKey: process.env.S3_ACCESS_KEY,
+    s3SecretKey: process.env.S3_SECRET_KEY,
   };
 }

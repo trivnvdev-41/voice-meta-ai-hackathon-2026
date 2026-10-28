@@ -19,3 +19,10 @@ label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px
 .error { color: #b3261e; font-size: 14px; margin-top: 8px; }
 ol.steps li, ul.ings li { margin-bottom: 6px; }
 .toolbar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+audio { width: 100%; max-width: 360px; }
+
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #16120e; --card: #1f1a15; --ink: #f2e8dc; --muted: #b3a290; --accent: #e08a4f; --line: #3a2f26; }
+  input, textarea, select { background: #221c17; color: var(--ink); }
+}

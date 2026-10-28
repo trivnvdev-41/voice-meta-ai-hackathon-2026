@@ -1,5 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+/** Graph API version; read per call so a .env loaded later still applies. */
+function graphVersion(): string {
+  return process.env.GRAPH_API_VERSION ?? "v21.0";
+}
+
 export interface IncomingMessage {
   from: string;
   type: string;
@@ -87,22 +92,35 @@ export async function sendCallButtonMessage(
 
 type JsonObject = Record<string, any>;
 
-export function parseIncoming(body: unknown): IncomingMessage | null {
-  const msg = (body as JsonObject | null)?.entry?.[0]?.changes?.[0]?.value
-    ?.messages?.[0] as JsonObject | undefined;
-  if (!msg || typeof msg.from !== "string") return null;
-  const incoming: IncomingMessage = {
-    from: msg.from,
-    type: typeof msg.type === "string" ? msg.type : "unknown",
-    messageId: typeof msg.id === "string" ? msg.id : "",
-  };
-  if (msg.type === "audio" && typeof msg.audio?.id === "string") {
-    incoming.audioId = msg.audio.id;
+export function parseIncomingMessages(body: unknown): IncomingMessage[] {
+  const out: IncomingMessage[] = [];
+  const entries = (body as JsonObject | null)?.entry;
+  if (!Array.isArray(entries)) return out;
+  for (const entry of entries) {
+    const changes = (entry as JsonObject)?.changes;
+    if (!Array.isArray(changes)) continue;
+    for (const change of changes) {
+      const messages = (change as JsonObject)?.value?.messages;
+      if (!Array.isArray(messages)) continue;
+      for (const raw of messages) {
+        const msg = raw as JsonObject;
+        if (!msg || typeof msg.from !== "string") continue;
+        const incoming: IncomingMessage = {
+          from: msg.from,
+          type: typeof msg.type === "string" ? msg.type : "unknown",
+          messageId: typeof msg.id === "string" ? msg.id : "",
+        };
+        if (msg.type === "audio" && typeof msg.audio?.id === "string") {
+          incoming.audioId = msg.audio.id;
+        }
+        if (msg.type === "text" && typeof msg.text?.body === "string") {
+          incoming.textBody = msg.text.body;
+        }
+        out.push(incoming);
+      }
+    }
   }
-  if (msg.type === "text" && typeof msg.text?.body === "string") {
-    incoming.textBody = msg.text.body;
-  }
-  return incoming;
+  return out;
 }
 
 export interface CallEventJob {
@@ -167,7 +185,7 @@ async function sendPayload(
   payload: unknown,
 ): Promise<void> {
   const res = await fetch(
-    `https://graph.facebook.com/v21.0/${creds.phoneNumberId}/messages`,
+    `https://graph.facebook.com/${graphVersion()}/${creds.phoneNumberId}/messages`,
     {
       method: "POST",
       headers: {

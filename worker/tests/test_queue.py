@@ -1,4 +1,14 @@
-from src.queue import ack_job, claim_job, processing_name, requeue_processing
+import json
+
+from src.queue import (
+    ack_job,
+    claim_job,
+    dead_letter,
+    dead_letter_name,
+    processing_name,
+    push_job,
+    requeue_processing,
+)
 
 
 class StubRedis:
@@ -93,3 +103,20 @@ def test_crash_requeues_unacked_jobs_in_order() -> None:
     assert claim_job(client, "q", proc) == "job-a"
     assert claim_job(client, "q", proc) == "job-b"
     assert claim_job(client, "q", proc) == "job-c"
+
+
+def test_push_job_appends_to_queue() -> None:
+    client = StubRedis()
+    push_job(client, "q", "job-x")
+    assert client.lists["q"] == ["job-x"]
+
+
+def test_dead_letter_keeps_payload_and_error() -> None:
+    client = StubRedis()
+    dead_letter(client, "q", '{"a":1}', "RuntimeError: boom")
+    parked = client.lists[dead_letter_name("q")]
+    assert len(parked) == 1
+    assert json.loads(parked[0]) == {
+        "payload": '{"a":1}',
+        "error": "RuntimeError: boom",
+    }

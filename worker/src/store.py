@@ -16,20 +16,32 @@ class DuplicateRecipe(Exception):
     """Raised when wa_message_id was already processed."""
 
 
-def upload_bytes(cfg: WorkerConfig, key: str, data: bytes, content_type: str) -> str:
-    client = boto3.session.Session().client(
+def _s3(cfg: WorkerConfig):
+    return boto3.session.Session().client(
         "s3",
         endpoint_url=cfg.s3_endpoint,
         aws_access_key_id=cfg.s3_access_key,
         aws_secret_access_key=cfg.s3_secret_key,
     )
-    client.put_object(Bucket=cfg.s3_bucket, Key=key, Body=data, ContentType=content_type)
-    url = client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": cfg.s3_bucket, "Key": key},
-        ExpiresIn=7 * 24 * 3600,
+
+
+def upload_bytes(cfg: WorkerConfig, key: str, data: bytes, content_type: str) -> str:
+    """Upload the object and return its key (signed later, on read)."""
+    _s3(cfg).put_object(
+        Bucket=cfg.s3_bucket, Key=key, Body=data, ContentType=content_type
     )
-    return str(url)
+    return key
+
+
+def presign_key(cfg: WorkerConfig, key: str, expires_in: int = 3600) -> str:
+    """Sign a key for an outbound message (Meta fetches it immediately)."""
+    return str(
+        _s3(cfg).generate_presigned_url(
+            "get_object",
+            Params={"Bucket": cfg.s3_bucket, "Key": key},
+            ExpiresIn=expires_in,
+        )
+    )
 
 
 def _get_or_create_member(conn: psycopg.Connection, wa_from: str) -> tuple[str, str]:
@@ -57,7 +69,7 @@ def save_recipe(
     message_id: str,
     draft: RecipeDraft,
     transcript: str,
-    voice_url: str,
+    voice_key: str,
 ) -> str:
     recipe_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
@@ -96,7 +108,7 @@ def save_recipe(
             cur.execute(
                 """INSERT INTO media_assets (id, recipe_id, kind, storage_url, created_at)
                    VALUES (%s, %s, %s, %s, %s)""",
-                (str(uuid.uuid4()), recipe_id, "voice", voice_url, now),
+                (str(uuid.uuid4()), recipe_id, "voice", voice_key, now),
             )
         conn.commit()
     return recipe_id

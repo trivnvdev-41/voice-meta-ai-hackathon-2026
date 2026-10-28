@@ -3,7 +3,12 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine
@@ -14,9 +19,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./gateway/migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grv -d grv"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   gateway:
     build: ./gateway
@@ -25,15 +34,20 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   worker:
     build: ./worker
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   asterisk:
     build:
@@ -47,6 +61,9 @@ services:
       - "10000-10100:10000-10100/udp"
     volumes:
       - astkeys:/etc/asterisk/keys
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -8,7 +8,16 @@ import redis
 from .call_events import handle_call_event
 from .config import load_config
 from .pipeline import run_job
-from .queue import ack_job, claim_job, processing_name, requeue_processing
+from .queue import (
+    ack_job,
+    claim_job,
+    dead_letter,
+    processing_name,
+    push_job,
+    requeue_processing,
+)
+
+MAX_RETRIES = 1
 
 
 def main() -> None:
@@ -33,12 +42,22 @@ def main() -> None:
             ack_job(client, processing, payload)
             continue
         try:
-            if isinstance(job, dict) and job.get("kind") == "call_event":
+            if job.get("kind") == "call_event":
                 handle_call_event(cfg, job)
             else:
                 run_job(cfg, job)
         except Exception as exc:
-            print(f"job failed: {exc}", flush=True)
+            retries = job.get("_retries", 0)
+            error = f"{type(exc).__name__}: {exc}"
+            print(f"job failed ({retries}/{MAX_RETRIES}): {error}", flush=True)
+            if isinstance(retries, int) and retries < MAX_RETRIES:
+                push_job(
+                    client,
+                    cfg.queue_name,
+                    json.dumps({**job, "_retries": retries + 1}),
+                )
+            else:
+                dead_letter(client, cfg.queue_name, payload, error)
         ack_job(client, processing, payload)
 
 

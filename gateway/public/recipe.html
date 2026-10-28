@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Resep — Recipe Vault</title>
+  <title>Resep — Chef in Your Ear</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <header>
-    <h1><a href="/" style="color:inherit;text-decoration:none">Grandma's Recipe Vault</a></h1>
+    <h1><a href="/" style="color:inherit;text-decoration:none">Chef in Your Ear</a></h1>
     <nav id="nav"></nav>
   </header>
   <main>
@@ -26,6 +26,7 @@
             <h3>${esc(r.name)}</h3>
             <div class="meta">${esc(r.creatorName)}${r.familyName ? " · marga " + esc(r.familyName) : ""}${r.region ? " · " + esc(r.region) : ""}</div>
             <div style="margin:8px 0"><span class="badge">${r.visibility === "public" ? "publik" : "privat"}</span></div>
+            ${r.hasVoice ? `<div style="margin:8px 0"><audio controls preload="none" src="/api/recipes/${r.id}/voice"></audio><div class="meta">Voice note asli</div></div>` : ""}
             <h4>Bahan</h4>
             <ul class="ings">${(r.ingredients || []).map((i) => `<li><b>${esc(i.name)}</b>${i.amount_original ? " — " + esc(i.amount_original) : ""}${i.amount_standardized ? ` <span class="meta">(${esc(i.amount_standardized)})</span>` : ""}</li>`).join("")}</ul>
             <h4>Langkah</h4>

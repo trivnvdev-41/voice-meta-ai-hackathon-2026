@@ -47,3 +47,22 @@ def test_question_goes_to_llm(monkeypatch) -> None:
     assert session.respond("garamnya berapa", "key") == "Secukupnya saja."
     assert "Rendang" in seen["prompt"] and "garamnya berapa" in seen["prompt"]
     assert seen["model"]
+
+
+def test_question_starting_with_ok_does_not_advance(monkeypatch) -> None:
+    monkeypatch.setattr(
+        copilot_mod,
+        "chat",
+        lambda prompt, api_key, base_url, model: "Sekitar 30 menit.",
+    )
+    session = CopilotSession(_recipe())
+    session.respond("lanjut", "key")
+    assert session.step_idx == 1
+    reply = session.respond("oke, berapa lama?", "key")
+    assert reply == "Sekitar 30 menit."
+    assert session.step_idx == 1
+
+
+def test_short_next_variants_still_navigate() -> None:
+    session = CopilotSession(_recipe())
+    assert "Masukkan bumbu" in session.respond("oke dong", "key")

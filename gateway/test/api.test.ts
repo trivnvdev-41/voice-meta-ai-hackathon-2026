@@ -3,6 +3,7 @@ import express from "express";
 import { describe, expect, it } from "vitest";
 import { signSession } from "../src/auth.js";
 import type { Db, DbRow } from "../src/db.js";
+import type { Presign } from "../src/media.js";
 import { createApiRouter } from "../src/recipes.js";
 import type { CallButtonOptions } from "../src/whatsapp.js";
 
@@ -16,14 +17,18 @@ class FakeDb implements Db {
   members: DbRow[] = [];
   recipes: DbRow[] = [];
   sessions: DbRow[] = [];
+  media: DbRow[] = [];
 
   async query(text: string, params: unknown[]): Promise<{ rows: DbRow[]; rowCount: number }> {
     const p = params as any[];
     if (text.includes("INSERT INTO users")) {
-      // VALUES ($1, $2, NULL, $3, $4, $5, $6): wa_id is a NULL literal
-      const [id, email, family_id, password_hash, role, display_name] = p;
-      this.users.push({ id, email, wa_id: null, family_id, password_hash, role, display_name });
+      // VALUES ($1, $2, $3, $4, $5, $6, $7)
+      const [id, email, wa_id, family_id, password_hash, role, display_name] = p;
+      this.users.push({ id, email, wa_id: wa_id ?? null, family_id, password_hash, role, display_name });
       return { rows: [], rowCount: 1 };
+    }
+    if (text.includes("FROM users WHERE wa_id")) {
+      return { rows: this.users.filter((u) => u.wa_id === p[0]), rowCount: 1 };
     }
     if (text.includes("FROM users WHERE email")) {
       return { rows: this.users.filter((u) => u.email === p[0]), rowCount: 1 };
@@ -47,9 +52,19 @@ class FakeDb implements Db {
       this.families.push({ id: p[0], name: p[1] });
       return { rows: [], rowCount: 1 };
     }
+    if (text.includes("FROM members WHERE family_id")) {
+      const rows = this.members.filter(
+        (m) => m.family_id === p[0] && m.wa_id == null && m.role === "owner",
+      );
+      return { rows, rowCount: rows.length };
+    }
     if (text.includes("INSERT INTO members")) {
-      const [id, family_id, wa_id, role, display_name] = p;
-      this.members.push({ id, family_id, wa_id, role, display_name });
+      // 4 params when wa_id is a NULL literal, 5 when it is bound
+      const [id, family_id, role, display_name] =
+        p.length === 4
+          ? [p[0], p[1], p[2], p[3]]
+          : [p[0], p[1], p[3], p[4]];
+      this.members.push({ id, family_id, wa_id: null, role, display_name });
       return { rows: [], rowCount: 1 };
     }
     if (text.includes("INSERT INTO recipes")) {
@@ -77,6 +92,10 @@ class FakeDb implements Db {
       const before = this.recipes.length;
       this.recipes = this.recipes.filter((r) => r.id !== p[0]);
       return { rows: [], rowCount: before - this.recipes.length };
+    }
+    if (text.includes("FROM media_assets")) {
+      const rows = this.media.filter((m) => m.recipe_id === p[0]);
+      return { rows, rowCount: rows.length };
     }
     if (text.includes("FROM recipes WHERE id")) {
       return { rows: this.recipes.filter((r) => r.id === p[0]), rowCount: 1 };
@@ -137,11 +156,14 @@ async function call(
       }
       resolve({ status, body: parsed, cookies });
     });
-    socket.connect(Number(url.port), url.hostname, () => socket.end(requestText));
+    socket.connect(Number(url.port), url.hostname, () => socket.write(requestText));
   });
 }
 
-async function withApi(fn: (base: string, db: FakeDb) => Promise<void>): Promise<void> {
+async function withApi(
+  fn: (base: string, db: FakeDb) => Promise<void>,
+  presign?: Presign,
+): Promise<void> {
   const db = new FakeDb();
   sentButtons.length = 0;
   const app = express();
@@ -155,6 +177,7 @@ async function withApi(fn: (base: string, db: FakeDb) => Promise<void>): Promise
       sendCallButton: async (to, opts) => {
         sentButtons.push({ to, opts });
       },
+      presign,
     }),
   );
   const server = app.listen(0);
@@ -169,7 +192,7 @@ async function withApi(fn: (base: string, db: FakeDb) => Promise<void>): Promise
 
 describe("web platform API", () => {
   it("register → login → create → read → update → delete", async () => {
-    await withApi(async (base) => {
+    await withApi(async (base, db) => {
       const reg = await call(base, "POST", "/api/register", {
         displayName: "Nenek",
         email: "nenek@vault.id",
@@ -193,6 +216,7 @@ describe("web platform API", () => {
         visibility: "public",
       }, cookie);
       expect(created.status).toBe(201);
+      expect(db.members).toHaveLength(1); // reuses the owner row, no per-recipe bloat
       const id = created.body.id as string;
 
       const list = await call(base, "GET", "/api/recipes", undefined, cookie);
@@ -283,9 +307,9 @@ describe("web platform API", () => {
   it("cook-sessions: creates session and sends call button", async () => {
     await withApi(async (base, db) => {
       const author = await call(base, "POST", "/api/register", {
-        email: "chef@x.id", password: "rahasia123", role: "author",
+        email: "chef@x.id", password: "rahasia123", role: "author", waId: "+62 812-3456-7890",
       });
-      db.users.find((u) => u.id === author.body.id)!.wa_id = "62812";
+      expect(db.users.find((u) => u.id === author.body.id)!.wa_id).toBe("6281234567890");
       const created = await call(base, "POST", "/api/recipes", {
         name: "Rendang", visibility: "public",
       }, author.cookies[0]);
@@ -297,7 +321,7 @@ describe("web platform API", () => {
       expect(db.sessions).toHaveLength(1);
       expect(db.sessions[0].recipe_id).toBe(created.body.id);
       expect(sentButtons).toHaveLength(1);
-      expect(sentButtons[0].to).toBe("62812");
+      expect(sentButtons[0].to).toBe("6281234567890");
       expect(sentButtons[0].opts.payload).toBe(`cook:${started.body.id}`);
     });
   });
@@ -324,5 +348,50 @@ describe("web platform API", () => {
       expect(unknown.status).toBe(404);
       expect(sentButtons).toHaveLength(0);
     });
+  });
+});
+
+describe("auth rate limiting", () => {
+  it("blocks the sixth register from the same ip", async () => {
+    await withApi(async (base) => {
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        const res = await call(base, "POST", "/api/register", {
+          email: `burst${i}@x.id`, password: "rahasia123",
+        });
+        statuses.push(res.status);
+      }
+      expect(statuses.slice(0, 5)).toEqual([201, 201, 201, 201, 201]);
+      expect(statuses[5]).toBe(429);
+    });
+  });
+});
+
+describe("voice archive", () => {
+  it("flags audio presence and redirects to a freshly signed url", async () => {
+    const signed: string[] = [];
+    await withApi(
+      async (base, db) => {
+        const author = await call(base, "POST", "/api/register", {
+          email: "voice@x.id", password: "rahasia123", role: "author",
+        });
+        const created = await call(base, "POST", "/api/recipes", {
+          name: "Rawon", visibility: "public",
+        }, author.cookies[0]);
+        const id = created.body.id as string;
+
+        expect((await call(base, "GET", `/api/recipes/${id}`)).body.hasVoice).toBe(false);
+        expect((await call(base, "GET", `/api/recipes/${id}/voice`)).status).toBe(404);
+
+        db.media.push({ recipe_id: id, kind: "voice", storage_url: "voice/abc.ogg" });
+        expect((await call(base, "GET", `/api/recipes/${id}`)).body.hasVoice).toBe(true);
+        expect((await call(base, "GET", `/api/recipes/${id}/voice`)).status).toBe(302);
+        expect(signed).toEqual(["voice/abc.ogg"]);
+      },
+      async (key) => {
+        signed.push(key);
+        return `https://signed.example/${key}`;
+      },
+    );
   });
 });

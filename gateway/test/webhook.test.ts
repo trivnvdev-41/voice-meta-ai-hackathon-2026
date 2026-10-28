@@ -8,7 +8,7 @@ import { createRouter, jsonParser } from "../src/routes.js";
 import {
   buildCallButtonMessage,
   parseCallEvents,
-  parseIncoming,
+  parseIncomingMessages,
   verifySignature,
   verifyWebhook,
 } from "../src/whatsapp.js";
@@ -27,7 +27,7 @@ describe("verifyWebhook", () => {
   });
 });
 
-describe("parseIncoming", () => {
+describe("parseIncomingMessages", () => {
   it("parses audio message", () => {
     const body = {
       entry: [
@@ -44,12 +44,12 @@ describe("parseIncoming", () => {
         },
       ],
     };
-    expect(parseIncoming(body)).toEqual({
+    expect(parseIncomingMessages(body)).toEqual([{
       from: "62812",
       type: "audio",
       messageId: "wamid.1",
       audioId: "media123",
-    });
+    }]);
   });
 
   it("parses text message", () => {
@@ -68,17 +68,40 @@ describe("parseIncoming", () => {
         },
       ],
     };
-    expect(parseIncoming(body)).toEqual({
+    expect(parseIncomingMessages(body)).toEqual([{
       from: "62812",
       type: "text",
       messageId: "wamid.2",
       textBody: "halo",
-    });
+    }]);
   });
 
-  it("returns null for status updates", () => {
+  it("returns [] for status updates", () => {
     const body = { entry: [{ changes: [{ value: { statuses: [{}] } }] }] };
-    expect(parseIncoming(body)).toBeNull();
+    expect(parseIncomingMessages(body)).toEqual([]);
+  });
+
+  it("returns every message in a batched webhook", () => {
+    const body = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  { id: "wamid.a", from: "62811", type: "audio", audio: { id: "m1" } },
+                  { id: "wamid.b", from: "62812", type: "text", text: { body: "hai" } },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    expect(parseIncomingMessages(body).map((m) => m.messageId)).toEqual([
+      "wamid.a",
+      "wamid.b",
+    ]);
   });
 });
 

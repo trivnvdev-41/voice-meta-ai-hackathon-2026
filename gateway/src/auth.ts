@@ -1,19 +1,37 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: string,
+  keylen: number,
+) => Promise<Buffer>;
 
 export const SESSION_COOKIE = "grv_session";
 
-export function hashPassword(password: string): string {
+export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64).toString("hex");
+  const hash = (await scryptAsync(password, salt, 64)).toString("hex");
   return `${salt}:${hash}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(
+  password: string,
+  stored: string,
+): Promise<boolean> {
   const [salt, expectedHex] = stored.split(":");
   if (!salt || !expectedHex) return false;
-  const actual = scryptSync(password, salt, 64);
+  const actual = await scryptAsync(password, salt, 64);
   const expected = Buffer.from(expectedHex, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+/** True when the request arrived over TLS (directly or via a proxy). */
+export function isHttps(req: {
+  secure: boolean;
+  header(name: string): string | undefined;
+}): boolean {
+  return req.secure || req.header("x-forwarded-proto") === "https";
 }
 
 export function signSession(userId: string, secret: string): string {
@@ -48,10 +66,10 @@ export function sessionFromHeader(
   return undefined;
 }
 
-export function sessionCookieHeader(value: string): string {
-  return `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`;
+export function sessionCookieHeader(value: string, secure = true): string {
+  return `${SESSION_COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure ? "; Secure" : ""}`;
 }
 
-export function clearSessionCookieHeader(): string {
-  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`;
+export function clearSessionCookieHeader(secure = true): string {
+  return `${SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure ? "; Secure" : ""}`;
 }

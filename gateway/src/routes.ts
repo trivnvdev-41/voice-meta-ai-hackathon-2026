@@ -4,12 +4,13 @@ import type { GatewayConfig } from "./config.js";
 import { enqueueJob } from "./queue.js";
 import {
   parseCallEvents,
-  parseIncoming,
+  parseIncomingMessages,
   sendAudioMessage,
   sendTextMessage,
   verifySignature,
   verifyWebhook,
 } from "./whatsapp.js";
+import { asyncHandler } from "./http.js";
 
 export const jsonParser = express.json({
   verify: (req, _res, buf) => {
@@ -37,7 +38,7 @@ export function createRouter(deps: RouterDeps): Router {
     else res.sendStatus(403);
   });
 
-  router.post("/webhook", async (req: Request, res: Response) => {
+  router.post("/webhook", asyncHandler(async (req: Request, res: Response) => {
     const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
     const valid = verifySignature(
       rawBody,
@@ -48,15 +49,16 @@ export function createRouter(deps: RouterDeps): Router {
       res.sendStatus(403);
       return;
     }
-    const incoming = parseIncoming(req.body);
+    const incoming = parseIncomingMessages(req.body);
     const callEvents = parseCallEvents(req.body);
     try {
-      if (incoming && (incoming.audioId ?? incoming.textBody)) {
+      for (const message of incoming) {
+        if (!(message.audioId ?? message.textBody)) continue;
         await enqueueJob(redis, config.queueName, {
-          waFrom: incoming.from,
-          messageId: incoming.messageId,
-          audioId: incoming.audioId,
-          textBody: incoming.textBody,
+          waFrom: message.from,
+          messageId: message.messageId,
+          audioId: message.audioId,
+          textBody: message.textBody,
           receivedAt: new Date().toISOString(),
         });
       }
@@ -72,7 +74,7 @@ export function createRouter(deps: RouterDeps): Router {
       return;
     }
     res.sendStatus(200);
-  });
+  }));
 
   router.post("/internal/dispatch", (req: Request, res: Response) => {
     if (req.header("x-internal-token") !== config.internalToken) {

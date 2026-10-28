@@ -1,4 +1,7 @@
+import pytest
+
 import src.pipeline as pipeline_mod
+import src.structure as structure_mod
 from src.config import WorkerConfig
 from src.pipeline import run_job, summarize_reply
 from src.store import DuplicateRecipe
@@ -97,7 +100,7 @@ def test_run_job_duplicate_recipe(monkeypatch) -> None:
 
 
 def test_run_job_failure_hides_details(monkeypatch) -> None:
-    """Internal error details go to logs, never to the user."""
+    """Details go to logs, never to the user; the error is re-raised for retry."""
     calls: list[tuple[str, str]] = []
 
     def _boom(*a):
@@ -110,11 +113,28 @@ def test_run_job_failure_hides_details(monkeypatch) -> None:
         lambda cfg, to, text="", audio_link="": calls.append((to, text)),
     )
 
-    run_job(
-        _dummy_config(),
-        {"waFrom": "62812", "messageId": "wamid.x", "audioId": "m1"},
-    )
+    with pytest.raises(RuntimeError):
+        run_job(
+            _dummy_config(),
+            {"waFrom": "62812", "messageId": "wamid.x", "audioId": "m1"},
+        )
     assert len(calls) == 1
     assert calls[0][0] == "62812"
     assert calls[0][1] == pipeline_mod.FAILURE_TEXT
     assert "secret-token-xyz" not in calls[0][1]
+
+
+def test_structure_recipe_repairs_invalid_json_once(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_chat(prompt: str, api_key: str, base_url: str, model: str) -> str:
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "here is the recipe: {not json}"
+        return '{"recipe_name": "Opor"}'
+
+    monkeypatch.setattr(structure_mod, "chat", fake_chat)
+    draft = structure_mod.structure_recipe("nenek bilang opor", "key")
+    assert draft.recipe_name == "Opor"
+    assert len(calls) == 2
+    assert "not valid" in calls[1]
