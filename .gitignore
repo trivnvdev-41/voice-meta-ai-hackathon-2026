@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 pgdata/
+
+# artifacts lokal (tidak untuk repo)
+graphify-out/
+orchestrator.md
