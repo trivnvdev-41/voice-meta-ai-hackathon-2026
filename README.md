@@ -1,107 +1,107 @@
-# Grandma's Recipe Vault — MVP: WA Loop E2E
+# Recipe Call Assistant — MVP: WA Loop E2E
 
-Voice-first **WhatsApp** platform untuk mengarsipkan resep warisan keluarga.
-MVP ini mencakup satu loop end-to-end: voice note masuk → terstruktur oleh AI →
-tersimpan → balasan suara kembali.
+Voice-first **WhatsApp** assistant for archiving family **cooking and drinks recipes**.
+This MVP covers one end-to-end loop: voice note in → structured by AI →
+saved → voice reply back.
 
-## Arsitektur
+## Architecture
 
 ```text
 WA voice ──► /webhook (gateway, Node) ──► Redis list ──► worker (Python)
                                                               │
             ┌─────────────────────────────────────────────────┘
-            │ unduh media → Whisper STT → Meta Llama structuring
+            │ download media → Whisper STT → Meta Llama structuring
             │ → Postgres + S3 → ElevenLabs TTS → dispatch
             ▼
-gateway /internal/dispatch ──► WA reply (teks + voice)
+gateway /internal/dispatch ──► WA reply (text + voice)
 ```
 
-- **gateway/** (Node + TypeScript + Express): verifikasi webhook, enqueue <200ms,
-  pengiriman balasan via Meta Cloud API.
-- **worker/** (Python): pipeline AI sinkron, satu job per voice note.
-- **Postgres**: metadata resep; **S3-compat** (R2/Spaces): arsip voice asli.
+- **gateway/** (Node + TypeScript + Express): webhook verification, enqueue in <200ms,
+  reply delivery via Meta Cloud API.
+- **worker/** (Python): synchronous AI pipeline, one job per voice note.
+- **Postgres**: recipe metadata; **S3-compatible** (R2/Spaces): original voice archive.
 
 ## Quickstart
 
 ```bash
-cp .env.example .env        # isi semua CHANGE_ME
+cp .env.example .env        # fill every CHANGE_ME
 docker compose up --build
 ```
 
-Expose webhook ke Meta saat dev:
+Expose the webhook to Meta during development:
 
 ```bash
-ngrok http 3000   # pakai URL https-nya sebagai Callback URL
+ngrok http 3000   # use the https URL as the Callback URL
 ```
 
-Jalankan tanpa Docker (dev lokal, butuh Redis + Postgres lokal):
+Run without Docker (local dev, needs local Redis + Postgres):
 
 ```bash
 # gateway
 cd gateway && npm install && npm run dev
 
-# worker (env project-lokal di root)
+# worker (local project env at repo root)
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r worker/requirements.txt
 cd worker && python -m src.main
 ```
 
-## Platform Web (resep + akun)
+## Web Platform (recipes + accounts)
 
-Gateway juga melayani web di `/`: daftar sebagai **author** (chef/keluarga,
-bisa tulis resep) atau **client** (baca resep publik, siap untuk kopilot WA).
+The gateway also serves the web app at `/`: register as an **author** (chef/family,
+can write recipes) or a **client** (read public recipes, ready for the WA copilot).
 
 ```bash
-cd gateway && npm install && npm run dev   # butuh Postgres lokal + .env
-# buka http://localhost:3000 di browser
+cd gateway && npm install && npm run dev   # needs local Postgres + .env
+# open http://localhost:3000 in a browser
 ```
 
 API: `POST /api/register`, `POST /api/login`, `GET /api/me`,
 `GET/POST /api/recipes`, `GET/PUT/DELETE /api/recipes/:id`.
-Sesi via cookie `grv_session` (HMAC, HttpOnly). Tulis resep = peran author saja;
-resep privat hanya terlihat pemiliknya. Skema di `gateway/migrations/`
-(dijalankan otomatis saat gateway boot, juga oleh Postgres container fresh).
+Session via `grv_session` cookie (HMAC, HttpOnly). Writing recipes = author role only;
+private recipes are visible to their owner only. Schema lives in `gateway/migrations/`
+(applied automatically on gateway boot, and by a fresh Postgres container).
 
-Next: pairing nomor WA via OTP.
+Next: WA number pairing via OTP.
 
-## Kopilot call (native WA calling)
+## Call copilot (native WA calling)
 
-Tombol **Masak via Call** di halaman resep → sesi masak + tombol call
-`voice_call` dikirim ke WA client → call dijawab Asterisk → AI pandu
-langkah-demi-langkah. Status call terlacak via webhook `calls`.
-Butuh: Calling API + SIP enable (lihat `asterisk/README.md`).
+The **Cook via Call** button on a recipe page → cooking session + `voice_call`
+button sent to the WA client → call answered by Asterisk → the AI guides you
+step by step. Call status is tracked through the `calls` webhook.
+Requires: Calling API + SIP enabled (see `asterisk/README.md`).
 
-## Setup Meta (checklist)
+## Meta setup (checklist)
 
-1. Buat App di Meta App Dashboard → tambah produk **WhatsApp**.
-2. Catat **Phone Number ID** + **Token** + **App Secret** (test number untuk dev).
+1. Create an App in Meta App Dashboard → add the **WhatsApp** product.
+2. Note the **Phone Number ID** + **Token** + **App Secret** (test number for dev).
 3. Set Callback URL `https://<tunnel>/webhook` + Verify Token = `WHATSAPP_VERIFY_TOKEN`.
-4. Subscribe field `messages`, kirim voice note ke test number.
+4. Subscribe to the `messages` field, send a voice note to the test number.
 
 ## Test
 
 ```bash
 cd gateway && npm test && npm run typecheck
-cd worker && python -m pytest -q   # dengan .venv root aktif
+cd worker && python -m pytest -q   # with the root .venv active
 ```
 
-## Asumsi MVP (eksplisit)
+## MVP assumptions (explicit)
 
-- **Antrean = Redis list reliable**, bukan BullMQ — agar gateway Node dan worker
-  Python interoperabilitas tanpa protokol khusus. Worker claim via `BLMOVE` ke
-  `<queue>:processing` dan ack via `LREM` setelah job selesai; sisa processing
-  direqueue otomatis saat boot. Modul antrean terisolasi sehingga gampang
-  diganti BullMQ nanti (butuh retry/UI).
-- **Balasan suara via link S3 presigned** (7 hari) — Meta `audio.link` butuh URL publik.
-- **Satu voice note = satu resep**; pesan teks dibalas panduan singkat.
-  Multi-turn dialog (LangGraph/state) = fase berikutnya.
-- **Keamanan webhook**: tiap POST wajib lolos `X-Hub-Signature-256` (403 bila palsu);
-  enqueue gagal → 500 agar Meta retry; `wa_message_id` UNIQUE mencegah resep ganda.
-- Foto/OCR (SAM/PaddleOCR), video memasak, dan Public Explorer di luar MVP.
+- **Queue = reliable Redis list**, not BullMQ — so the Node gateway and the Python
+  worker interoperate without a custom protocol. The worker claims via `BLMOVE` into
+  `<queue>:processing` and acks via `LREM` after the job finishes; leftovers in
+  processing are requeued automatically on boot. The queue module is isolated, so
+  swapping in BullMQ later (needs retry/UI) is easy.
+- **Voice reply via presigned S3 link** (7 days) — Meta `audio.link` requires a public URL.
+- **One voice note = one recipe**; text messages get a short guidance reply.
+  Multi-turn dialog (LangGraph/state) = next phase.
+- **Webhook security**: every POST must pass `X-Hub-Signature-256` (403 if forged);
+  failed enqueue → 500 so Meta retries; `wa_message_id` UNIQUE prevents duplicate recipes.
+- Photo/OCR (SAM/PaddleOCR), cooking videos, and the Public Explorer are out of MVP scope.
 
 ## Roadmap
 
-1. Multi-turn klarifikasi + state percakapan (Redis/LangGraph).
-2. Foto resep: SAM segmentasi + OCR tulisan tangan.
-3. Family Vault web (arsip + playback) + Public Heritage Explorer (opt-in).
-4. Ganti antrean ke BullMQ + ganti STT/TTS ke Seamless/Faster-Whisper bila perlu.
+1. Multi-turn clarification + conversation state (Redis/LangGraph).
+2. Recipe photos: SAM segmentation + handwriting OCR.
+3. Family Vault web (archive + playback) + Public Heritage Explorer (opt-in).
+4. Move the queue to BullMQ + swap STT/TTS to Seamless/Faster-Whisper if needed.
