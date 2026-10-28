@@ -10,7 +10,7 @@ tersimpan → balasan suara kembali.
 WA voice ──► /webhook (gateway, Node) ──► Redis list ──► worker (Python)
                                                               │
             ┌─────────────────────────────────────────────────┘
-            │ unduh media → Whisper STT → Gemini structuring
+            │ unduh media → Whisper STT → Meta Llama structuring
             │ → Postgres + S3 → ElevenLabs TTS → dispatch
             ▼
 gateway /internal/dispatch ──► WA reply (teks + voice)

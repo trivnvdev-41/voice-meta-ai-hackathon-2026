@@ -24,6 +24,7 @@ import psycopg  # noqa: E402
 
 from src.call_audio import FRAME_BYTES, UtteranceSegmenter, decode_to_slinear8k  # noqa: E402
 from src.copilot import CopilotSession  # noqa: E402
+from src.llm import DEFAULT_BASE_URL, DEFAULT_MODEL  # noqa: E402
 from src.stt import transcribe  # noqa: E402
 from src.tts import synthesize  # noqa: E402
 
@@ -39,16 +40,20 @@ def _req(name: str) -> str:
 class BridgeConfig:
     database_url: str
     openai_api_key: str
-    gemini_api_key: str
+    meta_api_key: str
     elevenlabs_api_key: str
     elevenlabs_voice_id: str
+    meta_base_url: str = DEFAULT_BASE_URL
+    meta_model: str = DEFAULT_MODEL
 
 
 def load_bridge_config() -> BridgeConfig:
     return BridgeConfig(
         database_url=_req("DATABASE_URL"),
         openai_api_key=_req("OPENAI_API_KEY"),
-        gemini_api_key=_req("GEMINI_API_KEY"),
+        meta_api_key=_req("META_API_KEY"),
+        meta_base_url=os.environ.get("META_BASE_URL", DEFAULT_BASE_URL),
+        meta_model=os.environ.get("META_MODEL", DEFAULT_MODEL),
         elevenlabs_api_key=_req("ELEVENLABS_API_KEY"),
         elevenlabs_voice_id=_req("ELEVENLABS_VOICE_ID"),
     )
@@ -162,7 +167,9 @@ def speak(audio_out, text: str, cfg: BridgeConfig) -> None:
 
 def process_utterance(cfg: BridgeConfig, session: CopilotSession, pcm: bytes) -> str:
     transcript = transcribe(pcm, "turn.ogg", cfg.openai_api_key)
-    return session.respond(transcript, cfg.gemini_api_key)
+    return session.respond(
+        transcript, cfg.meta_api_key, cfg.meta_base_url, cfg.meta_model
+    )
 
 
 def run_call(env: dict, audio_in, audio_out, cfg: BridgeConfig, conn) -> None:

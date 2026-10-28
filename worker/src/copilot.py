@@ -1,7 +1,7 @@
-"""Cooking copilot brain: step state, keyword navigation, Gemini Q&A."""
+"""Cooking copilot brain: step state, keyword navigation, Meta Llama Q&A."""
 from __future__ import annotations
 
-import httpx
+from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL, chat
 
 NAV_NEXT = ("lanjut", "terus", "selanjutnya", "next", "oke", "ok", "siap")
 NAV_REPEAT = ("ulangi", "apa tadi", "repeat")
@@ -43,7 +43,13 @@ class CopilotSession:
     def _say_step(self) -> str:
         return f"Langkah {self.step_idx + 1}: {self.steps[self.step_idx]}."
 
-    def respond(self, transcript: str, api_key: str) -> str:
+    def respond(
+        self,
+        transcript: str,
+        api_key: str,
+        base_url: str = DEFAULT_BASE_URL,
+        model: str = DEFAULT_MODEL,
+    ) -> str:
         said = transcript.lower()
         if any(k in said for k in NAV_REPEAT):
             reply = self._say_step() if self.steps else "Belum ada langkah."
@@ -55,7 +61,7 @@ class CopilotSession:
         elif any(k in said for k in NAV_NEXT):
             reply = self._advance()
         else:
-            reply = answer_question(self, transcript, api_key)
+            reply = answer_question(self, transcript, api_key, base_url, model)
         self.history.append((transcript, reply))
         self.history = self.history[-6:]
         return reply
@@ -80,7 +86,13 @@ class CopilotSession:
         return "Bahannya: " + ", ".join(parts) + "."
 
 
-def answer_question(session: CopilotSession, transcript: str, api_key: str) -> str:
+def answer_question(
+    session: CopilotSession,
+    transcript: str,
+    api_key: str,
+    base_url: str = DEFAULT_BASE_URL,
+    model: str = DEFAULT_MODEL,
+) -> str:
     ingredients = session.recipe.get("ingredients") or []
     history = "; ".join(f"P: {t} / J: {r}" for t, r in session.history[-5:])
     prompt = QA_PROMPT.format(
@@ -94,11 +106,4 @@ def answer_question(session: CopilotSession, transcript: str, api_key: str) -> s
         history=history or "-",
         transcript=transcript,
     )
-    with httpx.Client(timeout=30) as client:
-        response = client.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-        )
-        response.raise_for_status()
-        return str(response.json()["candidates"][0]["content"]["parts"][0]["text"]).strip()
+    return chat(prompt, api_key, base_url, model)

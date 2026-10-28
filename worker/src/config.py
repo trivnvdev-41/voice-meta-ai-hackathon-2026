@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL
+
 
 def _req(name: str) -> str:
     value = os.environ.get(name)
@@ -18,7 +20,7 @@ class WorkerConfig:
     queue_name: str
     whatsapp_token: str
     openai_api_key: str
-    gemini_api_key: str
+    meta_api_key: str
     elevenlabs_api_key: str
     elevenlabs_voice_id: str
     database_url: str
@@ -28,6 +30,8 @@ class WorkerConfig:
     s3_secret_key: str
     gateway_url: str
     internal_token: str
+    meta_base_url: str = DEFAULT_BASE_URL
+    meta_model: str = DEFAULT_MODEL
 
 
 def load_config() -> WorkerConfig:
@@ -36,7 +40,9 @@ def load_config() -> WorkerConfig:
         queue_name=os.environ.get("QUEUE_NAME", "recipe:jobs"),
         whatsapp_token=_req("WHATSAPP_TOKEN"),
         openai_api_key=_req("OPENAI_API_KEY"),
-        gemini_api_key=_req("GEMINI_API_KEY"),
+        meta_api_key=_req("META_API_KEY"),
+        meta_base_url=os.environ.get("META_BASE_URL", DEFAULT_BASE_URL),
+        meta_model=os.environ.get("META_MODEL", DEFAULT_MODEL),
         elevenlabs_api_key=_req("ELEVENLABS_API_KEY"),
         elevenlabs_voice_id=_req("ELEVENLABS_VOICE_ID"),
         database_url=_req("DATABASE_URL"),

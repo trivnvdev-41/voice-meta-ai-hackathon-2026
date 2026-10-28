@@ -1,10 +1,11 @@
-"""Transcript -> structured recipe via Gemini."""
+"""Transcript -> structured recipe via Meta Llama."""
 from __future__ import annotations
 
 import json
 
-import httpx
 from pydantic import BaseModel, Field
+
+from .llm import DEFAULT_BASE_URL, DEFAULT_MODEL, chat
 
 
 class Ingredient(BaseModel):
@@ -52,16 +53,11 @@ def parse_recipe_json(raw: str) -> RecipeDraft:
     return RecipeDraft.model_validate(json.loads(text))
 
 
-def structure_recipe(transcript: str, api_key: str) -> RecipeDraft:
-    with httpx.Client(timeout=60) as client:
-        response = client.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "contents": [{"parts": [{"text": build_prompt(transcript)}]}],
-                "generationConfig": {"responseMimeType": "application/json"},
-            },
-        )
-        response.raise_for_status()
-        raw = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+def structure_recipe(
+    transcript: str,
+    api_key: str,
+    base_url: str = DEFAULT_BASE_URL,
+    model: str = DEFAULT_MODEL,
+) -> RecipeDraft:
+    raw = chat(build_prompt(transcript), api_key, base_url, model)
     return parse_recipe_json(raw)

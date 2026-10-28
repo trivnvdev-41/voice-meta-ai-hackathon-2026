@@ -24,7 +24,7 @@ Probe kirim INVITE UDP ke 5060, tunggu 200 OK, tutup dengan ACK + BYE.
 
 Jawaban call langsung diserahkan ke `ai_bridge.py` (EAGI, audio 8 kHz di fd 3):
 dengar ucapan (VAD) → Whisper → kopilot resep (`worker/src/copilot.py`,
-navigasi kata kunci + tanya-jawab Gemini, maks 2 kalimat) → ElevenLabs →
+navigasi kata kunci + tanya-jawab Meta Llama, maks 2 kalimat) → ElevenLabs →
 putar balik ke call. Turn-based, tanpa barge-in.
 
 Resep diambil dari Postgres: arg EAGI, lalu terbaru milik penelepon

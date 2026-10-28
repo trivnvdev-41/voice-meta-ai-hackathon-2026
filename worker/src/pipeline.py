@@ -49,7 +49,9 @@ def run_job(cfg: WorkerConfig, job: dict) -> None:
             cfg, f"voice/{uuid.uuid4()}.{ext}", audio_bytes, mime
         )
         transcript = transcribe(audio_bytes, f"recipe.{ext}", cfg.openai_api_key)
-        draft = structure_recipe(transcript, cfg.gemini_api_key)
+        draft = structure_recipe(
+            transcript, cfg.meta_api_key, cfg.meta_base_url, cfg.meta_model
+        )
         save_recipe(cfg, to, str(job.get("messageId", "")), draft, transcript, voice_url)
         reply = summarize_reply(
             draft.recipe_name,

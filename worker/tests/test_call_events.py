@@ -5,7 +5,7 @@ from src.config import WorkerConfig
 def _cfg() -> WorkerConfig:
     return WorkerConfig(
         redis_url="r", queue_name="q", whatsapp_token="w", openai_api_key="o",
-        gemini_api_key="g", elevenlabs_api_key="e", elevenlabs_voice_id="v",
+        meta_api_key="g", elevenlabs_api_key="e", elevenlabs_voice_id="v",
         database_url="d", s3_endpoint="s", s3_bucket="b", s3_access_key="a",
         s3_secret_key="s", gateway_url="g", internal_token="i",
     )

@@ -37,28 +37,13 @@ def test_ingredients_answer() -> None:
 def test_question_goes_to_llm(monkeypatch) -> None:
     seen: dict = {}
 
-    class FakeResponse:
-        def raise_for_status(self) -> None:
-            pass
+    def fake_chat(prompt: str, api_key: str, base_url: str, model: str) -> str:
+        seen["prompt"] = prompt
+        seen["model"] = model
+        return "Secukupnya saja."
 
-        def json(self) -> dict:
-            return {"candidates": [{"content": {"parts": [{"text": "Secukupnya saja."}]}}]}
-
-    class FakeClient:
-        def __init__(self, *a, **k) -> None:
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a) -> bool:
-            return False
-
-        def post(self, url, headers=None, json=None):
-            seen["prompt"] = json["contents"][0]["parts"][0]["text"]
-            return FakeResponse()
-
-    monkeypatch.setattr(copilot_mod.httpx, "Client", FakeClient)
+    monkeypatch.setattr(copilot_mod, "chat", fake_chat)
     session = CopilotSession(_recipe())
     assert session.respond("garamnya berapa", "key") == "Secukupnya saja."
     assert "Rendang" in seen["prompt"] and "garamnya berapa" in seen["prompt"]
+    assert seen["model"]

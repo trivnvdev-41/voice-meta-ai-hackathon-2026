@@ -11,7 +11,7 @@ def _dummy_config() -> WorkerConfig:
         queue_name="recipe:jobs",
         whatsapp_token="d",
         openai_api_key="d",
-        gemini_api_key="d",
+        meta_api_key="d",
         elevenlabs_api_key="d",
         elevenlabs_voice_id="d",
         database_url="postgresql://localhost/grv",
