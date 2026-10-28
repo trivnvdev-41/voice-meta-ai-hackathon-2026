@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resep — Recipe Vault</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1><a href="/" style="color:inherit;text-decoration:none">Grandma's Recipe Vault</a></h1>
+    <nav id="nav"></nav>
+  </header>
+  <main>
+    <div id="detail"></div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    async function load() {
+      const id = new URLSearchParams(location.search).get("id");
+      const user = await renderHeader();
+      try {
+        const r = await api(`/api/recipes/${id}`);
+        document.getElementById("detail").innerHTML = `
+          <div class="card">
+            <h3>${esc(r.name)}</h3>
+            <div class="meta">${esc(r.creatorName)}${r.familyName ? " · marga " + esc(r.familyName) : ""}${r.region ? " · " + esc(r.region) : ""}</div>
+            <div style="margin:8px 0"><span class="badge">${r.visibility === "public" ? "publik" : "privat"}</span></div>
+            <h4>Bahan</h4>
+            <ul class="ings">${(r.ingredients || []).map((i) => `<li><b>${esc(i.name)}</b>${i.amount_original ? " — " + esc(i.amount_original) : ""}${i.amount_standardized ? ` <span class="meta">(${esc(i.amount_standardized)})</span>` : ""}</li>`).join("")}</ul>
+            <h4>Langkah</h4>
+            <ol class="steps">${(r.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+            ${r.story ? `<h4>Cerita</h4><p>${esc(r.story)}</p>` : ""}
+            ${r.mine ? `<a class="btn" href="/editor.html?id=${r.id}">Ubah</a>` : ""}
+            ${user ? `<button id="cook" style="margin-left:8px">Masak via Call</button>` : ""}
+            <div id="cook-msg" style="margin-top:8px"></div>
+          </div>`;
+        if (user) {
+          document.getElementById("cook").onclick = async () => {
+            const msg = document.getElementById("cook-msg");
+            try {
+              await api("/api/cook-sessions", { method: "POST", body: JSON.stringify({ recipeId: r.id }) });
+              msg.textContent = "Tombol call dikirim ke WhatsApp kamu — tekan untuk mulai masak dipandu suara.";
+            } catch (e) { msg.textContent = e.message; msg.className = "error"; }
+          };
+        }
+      } catch (e) {
+        if (user) document.getElementById("detail").innerHTML = "<p>Resep tidak ditemukan.</p>";
+        else location.href = "/auth.html";
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

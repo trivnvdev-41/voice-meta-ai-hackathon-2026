@@ -1,0 +1,9 @@
+node_modules
+.venv
+graphify-out
+dist
+__pycache__
+*.pyc
+.git
+.env
+pgdata

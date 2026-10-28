@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grandma's Recipe Vault</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Grandma's Recipe Vault</h1>
+    <nav id="nav"></nav>
+  </header>
+  <main>
+    <div class="toolbar">
+      <button id="filter-all" class="ghost">Semua</button>
+      <button id="filter-mine" class="ghost">Resep saya</button>
+    </div>
+    <div id="list"></div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    let mineOnly = false;
+    async function load() {
+      const recipes = await api("/api/recipes");
+      const list = document.getElementById("list");
+      const shown = recipes.filter((r) => !mineOnly || r.mine);
+      list.innerHTML = shown.length ? shown.map((r) => `
+        <div class="card">
+          <h3><a href="/recipe.html?id=${r.id}">${esc(r.name)}</a></h3>
+          <div class="meta">${esc(r.creatorName)}${r.familyName ? " · " + esc(r.familyName) : ""}${r.region ? " · " + esc(r.region) : ""}</div>
+          <div style="margin-top:8px"><span class="badge">${r.visibility === "public" ? "publik" : "privat"}</span>${r.mine ? ' <span class="badge">milik saya</span>' : ""}</div>
+        </div>`).join("") : "<p>Belum ada resep.</p>";
+    }
+    document.getElementById("filter-all").onclick = () => { mineOnly = false; load(); };
+    document.getElementById("filter-mine").onclick = () => { mineOnly = true; load(); };
+    renderHeader().then(load);
+  </script>
+</body>
+</html>

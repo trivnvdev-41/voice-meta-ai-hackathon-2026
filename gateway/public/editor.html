@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tulis Resep — Recipe Vault</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1><a href="/" style="color:inherit;text-decoration:none">Grandma's Recipe Vault</a></h1>
+    <nav id="nav"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h3 id="title">Resep baru</h3>
+      <label>Nama resep</label><input id="f-name" />
+      <div class="row">
+        <div><label>Pencipta (mis. Nenek)</label><input id="f-creator" /></div>
+        <div><label>Marga / keluarga</label><input id="f-family" /></div>
+      </div>
+      <div class="row">
+        <div><label>Daerah</label><input id="f-region" /></div>
+        <div><label>Bahasa</label><input id="f-language" /></div>
+      </div>
+      <label>Visibilitas</label>
+      <select id="f-visibility">
+        <option value="private">Privat (keluarga)</option>
+        <option value="public">Publik</option>
+      </select>
+      <h4>Bahan</h4>
+      <div id="ings"></div>
+      <button class="ghost" id="add-ing">+ Bahan</button>
+      <h4>Langkah</h4>
+      <div id="steps"></div>
+      <button class="ghost" id="add-step">+ Langkah</button>
+      <label>Cerita / konteks budaya</label><textarea id="f-story" rows="3"></textarea>
+      <div style="margin-top:14px;display:flex;gap:8px">
+        <button id="save">Simpan</button>
+        <button class="ghost" id="del" style="display:none;color:#b3261e;border-color:#b3261e">Hapus</button>
+      </div>
+      <div class="error" id="err"></div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    const editId = new URLSearchParams(location.search).get("id");
+
+    function ingRow(v = {}) {
+      const d = document.createElement("div");
+      d.className = "row";
+      d.innerHTML = `<input placeholder="nama" value="${esc(v.name)}" data-k="name" />
+        <input placeholder="takaran asli (sejemput)" value="${esc(v.amount_original)}" data-k="amount_original" />
+        <input placeholder="takaran baku (5 g)" value="${esc(v.amount_standardized)}" data-k="amount_standardized" />`;
+      return d;
+    }
+    function stepRow(v = "") {
+      const d = document.createElement("div");
+      d.className = "row";
+      d.innerHTML = `<input placeholder="langkah" value="${esc(v)}" />`;
+      return d;
+    }
+    document.getElementById("add-ing").onclick = () => document.getElementById("ings").appendChild(ingRow());
+    document.getElementById("add-step").onclick = () => document.getElementById("steps").appendChild(stepRow());
+
+    function collect() {
+      const ings = [...document.querySelectorAll("#ings .row")].map((r) => ({
+        name: r.querySelector('[data-k="name"]').value,
+        amount_original: r.querySelector('[data-k="amount_original"]').value,
+        amount_standardized: r.querySelector('[data-k="amount_standardized"]').value,
+      })).filter((i) => i.name.trim());
+      const steps = [...document.querySelectorAll("#steps input")].map((i) => i.value).filter((s) => s.trim());
+      return {
+        name: document.getElementById("f-name").value,
+        creatorName: document.getElementById("f-creator").value,
+        familyName: document.getElementById("f-family").value,
+        region: document.getElementById("f-region").value,
+        language: document.getElementById("f-language").value,
+        visibility: document.getElementById("f-visibility").value,
+        ingredients: ings,
+        steps,
+        story: document.getElementById("f-story").value,
+      };
+    }
+
+    async function init() {
+      const user = await renderHeader();
+      if (!requireLogin(user)) return;
+      if (user.role !== "author") {
+        document.getElementById("err").textContent = "Hanya peran author yang bisa menulis resep.";
+        return;
+      }
+      document.getElementById("ings").appendChild(ingRow());
+      document.getElementById("steps").appendChild(stepRow());
+      if (editId) {
+        document.getElementById("title").textContent = "Ubah resep";
+        document.getElementById("del").style.display = "";
+        const r = await api(`/api/recipes/${editId}`);
+        document.getElementById("f-name").value = r.name || "";
+        document.getElementById("f-creator").value = r.creatorName || "";
+        document.getElementById("f-family").value = r.familyName || "";
+        document.getElementById("f-region").value = r.region || "";
+        document.getElementById("f-language").value = r.language || "";
+        document.getElementById("f-visibility").value = r.visibility || "private";
+        document.getElementById("f-story").value = r.story || "";
+        const ings = document.getElementById("ings"); ings.innerHTML = "";
+        (r.ingredients || []).forEach((i) => ings.appendChild(ingRow(i)));
+        if (!r.ingredients?.length) ings.appendChild(ingRow());
+        const steps = document.getElementById("steps"); steps.innerHTML = "";
+        (r.steps || []).forEach((s) => steps.appendChild(stepRow(s)));
+        if (!r.steps?.length) steps.appendChild(stepRow());
+      }
+    }
+
+    document.getElementById("save").onclick = async () => {
+      try {
+        if (editId) {
+          await api(`/api/recipes/${editId}`, { method: "PUT", body: JSON.stringify(collect()) });
+          location.href = `/recipe.html?id=${editId}`;
+        } else {
+          const r = await api("/api/recipes", { method: "POST", body: JSON.stringify(collect()) });
+          location.href = `/recipe.html?id=${r.id}`;
+        }
+      } catch (e) { document.getElementById("err").textContent = e.message; }
+    };
+    document.getElementById("del").onclick = async () => {
+      if (!confirm("Hapus resep ini?")) return;
+      await api(`/api/recipes/${editId}`, { method: "DELETE" });
+      location.href = "/";
+    };
+    init();
+  </script>
+</body>
+</html>

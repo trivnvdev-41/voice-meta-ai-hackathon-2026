@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Masuk / Daftar — Recipe Vault</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1><a href="/" style="color:inherit;text-decoration:none">Grandma's Recipe Vault</a></h1>
+    <nav id="nav"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h3>Masuk</h3>
+      <label>Email</label><input id="login-email" type="email" />
+      <label>Password</label><input id="login-pass" type="password" />
+      <div style="margin-top:12px"><button id="login-btn">Masuk</button></div>
+      <div class="error" id="login-err"></div>
+    </div>
+    <div class="card">
+      <h3>Daftar</h3>
+      <label>Nama tampilan</label><input id="reg-name" />
+      <label>Email</label><input id="reg-email" type="email" />
+      <label>Password (min 8)</label><input id="reg-pass" type="password" />
+      <label>Peran</label>
+      <select id="reg-role">
+        <option value="client">Client — mau dimasakkan / dipandu</option>
+        <option value="author">Author — chef / keluarga penulis resep</option>
+      </select>
+      <div style="margin-top:12px"><button id="reg-btn">Daftar</button></div>
+      <div class="error" id="reg-err"></div>
+    </div>
+  </main>
+  <script src="/app.js"></script>
+  <script>
+    renderHeader();
+    document.getElementById("login-btn").onclick = async () => {
+      try {
+        await api("/api/login", { method: "POST", body: JSON.stringify({
+          email: document.getElementById("login-email").value,
+          password: document.getElementById("login-pass").value,
+        }) });
+        location.href = "/";
+      } catch (e) { document.getElementById("login-err").textContent = e.message; }
+    };
+    document.getElementById("reg-btn").onclick = async () => {
+      try {
+        await api("/api/register", { method: "POST", body: JSON.stringify({
+          displayName: document.getElementById("reg-name").value,
+          email: document.getElementById("reg-email").value,
+          password: document.getElementById("reg-pass").value,
+          role: document.getElementById("reg-role").value,
+        }) });
+        location.href = "/";
+      } catch (e) { document.getElementById("reg-err").textContent = e.message; }
+    };
+  </script>
+</body>
+</html>
